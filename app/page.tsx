@@ -113,7 +113,7 @@ export default function Home() {
 
     setIsLoading(true);
     try {
-      const res = await fetch(`/api/flights?lat=${location.lat}&lon=${location.lon}&radius=150`);
+      const res = await fetch(`/api/flights?lat=${location.lat}&lon=${location.lon}&radius=250`);
       const data = await res.json();
       if (data.flights) {
         setFlights(data.flights);

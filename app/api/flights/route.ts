@@ -82,7 +82,7 @@ export async function GET(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams;
   const lat = parseFloat(searchParams.get("lat") || "");
   const lon = parseFloat(searchParams.get("lon") || "");
-  const radius = parseFloat(searchParams.get("radius") || "100"); // Default 100km
+  const radius = parseFloat(searchParams.get("radius") || "200"); // Default 200km
 
   if (isNaN(lat) || isNaN(lon)) {
     return NextResponse.json({ error: "Invalid coordinates" }, { status: 400 });
@@ -188,6 +188,12 @@ export async function GET(request: NextRequest) {
       flights,
       timestamp: data.time * 1000,
       userLocation: { lat, lon },
+      debug: {
+        rawCount: data.states?.length || 0,
+        filteredCount: flights.length,
+        boundingBox: { lamin, lamax, lomin, lomax },
+        radius,
+      },
     });
   } catch (error) {
     console.error("Flight API error:", error);
