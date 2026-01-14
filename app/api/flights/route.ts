@@ -101,15 +101,14 @@ export async function GET(request: NextRequest) {
 
   try {
     // OpenSky Network API - free, no auth needed for basic use
-    const response = await fetch(
-      `https://opensky-network.org/api/states/all?lamin=${lamin}&lamax=${lamax}&lomin=${lomin}&lomax=${lomax}`,
-      {
-        headers: {
-          "User-Agent": "WhatTheFlight/1.0",
-        },
-        next: { revalidate: 5 }, // Cache for 5 seconds
-      }
-    );
+    const apiUrl = `https://opensky-network.org/api/states/all?lamin=${lamin}&lamax=${lamax}&lomin=${lomin}&lomax=${lomax}`;
+
+    const response = await fetch(apiUrl, {
+      headers: {
+        "User-Agent": "WhatTheFlight/1.0",
+      },
+      cache: "no-store", // Don't cache - we want fresh data
+    });
 
     if (!response.ok) {
       // OpenSky has rate limits - return empty if rate limited
@@ -120,7 +119,12 @@ export async function GET(request: NextRequest) {
           timestamp: Date.now(),
         });
       }
-      throw new Error(`OpenSky API error: ${response.status}`);
+      return NextResponse.json({
+        flights: [],
+        error: `OpenSky API error: ${response.status} ${response.statusText}`,
+        timestamp: Date.now(),
+        debug: { apiUrl, status: response.status },
+      });
     }
 
     const data = await response.json();
@@ -197,9 +201,10 @@ export async function GET(request: NextRequest) {
     });
   } catch (error) {
     console.error("Flight API error:", error);
-    return NextResponse.json(
-      { error: "Failed to fetch flight data", flights: [] },
-      { status: 500 }
-    );
+    return NextResponse.json({
+      error: `Failed to fetch flight data: ${error instanceof Error ? error.message : "Unknown error"}`,
+      flights: [],
+      timestamp: Date.now(),
+    });
   }
 }
