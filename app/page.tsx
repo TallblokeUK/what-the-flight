@@ -144,11 +144,11 @@ export default function Home() {
     }
   }, [location]);
 
-  // Initial fetch and periodic refresh
+  // Fetch on app open, then every 60s to conserve API quota
   useEffect(() => {
     if (location) {
       fetchFlights();
-      const interval = setInterval(fetchFlights, 10000); // Refresh every 10s
+      const interval = setInterval(fetchFlights, 60000); // Refresh every 60s
       return () => clearInterval(interval);
     }
   }, [location, fetchFlights]);
