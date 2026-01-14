@@ -39,14 +39,18 @@ function angleDiff(a: number, b: number): number {
   return diff > 180 ? diff - 360 : diff;
 }
 
-// Smoothing for compass readings
-const SMOOTHING_FACTOR = 0.3;
+// Smoothing for compass readings - lower = smoother but more lag
+const SMOOTHING_FACTOR = 0.15;
+// Dead zone - ignore changes smaller than this (reduces micro-jitter)
+const DEAD_ZONE = 1.5; // degrees
 
 function smoothAngle(current: number | null, target: number, factor: number): number {
   if (current === null) return target;
   let diff = target - current;
   if (diff > 180) diff -= 360;
   if (diff < -180) diff += 360;
+  // Apply dead zone - ignore tiny changes
+  if (Math.abs(diff) < DEAD_ZONE) return current;
   return normalizeAngle(current + diff * factor);
 }
 
@@ -95,6 +99,10 @@ export default function Home() {
 
   const [matchedFlight, setMatchedFlight] = useState<FlightInfo | null>(null);
   const [selectedFlight, setSelectedFlight] = useState<FlightInfo | null>(null);
+  const [airportNames, setAirportNames] = useState<{
+    origin?: { name: string; city: string };
+    destination?: { name: string; city: string };
+  }>({});
 
   const lastHeadingRef = useRef<number | null>(null);
   const lastTiltRef = useRef<number | null>(null);
@@ -270,6 +278,43 @@ export default function Home() {
     setMatchedFlight(bestMatch);
   }, [compassHeading, deviceTilt, flights, isTracking]);
 
+  // Fetch airport names when a flight is selected
+  useEffect(() => {
+    if (!selectedFlight) {
+      setAirportNames({});
+      return;
+    }
+
+    const fetchAirportName = async (code: string) => {
+      try {
+        const res = await fetch(`/api/airports?code=${encodeURIComponent(code)}`);
+        if (res.ok) {
+          return await res.json();
+        }
+      } catch {
+        // Ignore errors
+      }
+      return null;
+    };
+
+    const fetchNames = async () => {
+      const results: typeof airportNames = {};
+
+      if (selectedFlight.origin) {
+        const origin = await fetchAirportName(selectedFlight.origin);
+        if (origin) results.origin = origin;
+      }
+
+      if (selectedFlight.destination) {
+        const dest = await fetchAirportName(selectedFlight.destination);
+        if (dest) results.destination = dest;
+      }
+
+      setAirportNames(results);
+    };
+
+    fetchNames();
+  }, [selectedFlight]);
 
   // Show loading state
   if (!location && !locationError) {
@@ -551,18 +596,20 @@ export default function Home() {
               {(selectedFlight.origin || selectedFlight.destination) ? (
                 <div className="bg-green-500/20 border border-green-500/30 rounded-lg p-4">
                   <div className="text-center">
-                    <div className="flex items-center justify-center gap-3 text-xl font-bold">
-                      <span>{selectedFlight.origin || "?"}</span>
+                    {/* City names - big and prominent */}
+                    <div className="flex items-center justify-center gap-3 text-xl font-bold mb-1">
+                      <span>{airportNames.origin?.city || selectedFlight.originName || selectedFlight.origin || "?"}</span>
                       <span className="text-green-400">→</span>
-                      <span>{selectedFlight.destination || "?"}</span>
+                      <span>{airportNames.destination?.city || selectedFlight.destinationName || selectedFlight.destination || "?"}</span>
                     </div>
-                    {(selectedFlight.originName || selectedFlight.destinationName) && (
-                      <div className="text-sm opacity-70 mt-1">
-                        {selectedFlight.originName && <span>{selectedFlight.originName}</span>}
-                        {selectedFlight.originName && selectedFlight.destinationName && <span> to </span>}
-                        {selectedFlight.destinationName && <span>{selectedFlight.destinationName}</span>}
-                      </div>
-                    )}
+                    {/* Airport codes and names */}
+                    <div className="text-sm opacity-70">
+                      <span>{selectedFlight.origin}</span>
+                      {airportNames.origin?.name && <span className="opacity-60"> ({airportNames.origin.name})</span>}
+                      <span className="mx-2">→</span>
+                      <span>{selectedFlight.destination}</span>
+                      {airportNames.destination?.name && <span className="opacity-60"> ({airportNames.destination.name})</span>}
+                    </div>
                   </div>
                 </div>
               ) : null}
