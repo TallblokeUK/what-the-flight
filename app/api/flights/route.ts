@@ -1,5 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 
+// Use edge runtime for better performance and longer timeouts
+export const runtime = "edge";
+
+// Increase max duration
+export const maxDuration = 30;
+
 // OpenSky Network API response type
 interface OpenSkyState {
   icao24: string;
@@ -103,12 +109,19 @@ export async function GET(request: NextRequest) {
     // OpenSky Network API - free, no auth needed for basic use
     const apiUrl = `https://opensky-network.org/api/states/all?lamin=${lamin}&lamax=${lamax}&lomin=${lomin}&lomax=${lomax}`;
 
+    // Set up timeout
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 25000); // 25 second timeout
+
     const response = await fetch(apiUrl, {
       headers: {
         "User-Agent": "WhatTheFlight/1.0",
       },
       cache: "no-store", // Don't cache - we want fresh data
+      signal: controller.signal,
     });
+
+    clearTimeout(timeoutId);
 
     if (!response.ok) {
       // OpenSky has rate limits - return empty if rate limited
