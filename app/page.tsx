@@ -16,6 +16,11 @@ interface FlightInfo {
   bearing: number;
   distance: number;
   elevation: number;
+  // Extra fields
+  registration?: string;
+  aircraft_type?: string;
+  operator?: string;
+  squawk?: string;
 }
 
 // Normalize angle to 0-360
@@ -113,7 +118,7 @@ export default function Home() {
 
     setIsLoading(true);
     try {
-      const res = await fetch(`/api/flights?lat=${location.lat}&lon=${location.lon}&radius=250`);
+      const res = await fetch(`/api/flights?lat=${location.lat}&lon=${location.lon}&radius=50`);
       const data = await res.json();
       if (data.flights) {
         setFlights(data.flights);
@@ -434,7 +439,12 @@ export default function Home() {
                 onClick={() => setSelectedFlight(matchedFlight)}
               >
                 <div className="flex items-center justify-between mb-2">
-                  <div className="text-2xl font-bold">{matchedFlight.callsign}</div>
+                  <div>
+                    <div className="text-2xl font-bold">{matchedFlight.callsign}</div>
+                    {matchedFlight.aircraft_type && (
+                      <div className="text-sm opacity-70">{matchedFlight.aircraft_type}</div>
+                    )}
+                  </div>
                   <div className="text-green-400 text-sm font-medium">MATCHED!</div>
                 </div>
                 <div className="grid grid-cols-3 gap-2 text-sm">
@@ -451,9 +461,11 @@ export default function Home() {
                     <div className="font-medium">{formatDistance(matchedFlight.distance)}</div>
                   </div>
                 </div>
-                <div className="mt-2 text-sm opacity-70">
-                  From {matchedFlight.origin_country}
-                </div>
+                {(matchedFlight.registration || matchedFlight.operator) && (
+                  <div className="mt-2 text-sm opacity-70">
+                    {matchedFlight.operator || matchedFlight.registration}
+                  </div>
+                )}
                 <div className="mt-2 text-xs opacity-50">Tap for more info</div>
               </div>
             ) : (
@@ -510,11 +522,16 @@ export default function Home() {
           onClick={() => setSelectedFlight(null)}
         >
           <div
-            className="bg-[#0c1929] border border-white/20 rounded-2xl p-6 max-w-md w-full"
+            className="bg-[#0c1929] border border-white/20 rounded-2xl p-6 max-w-md w-full max-h-[90vh] overflow-y-auto"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between mb-4">
-              <h2 className="text-2xl font-bold">{selectedFlight.callsign}</h2>
+              <div>
+                <h2 className="text-2xl font-bold">{selectedFlight.callsign}</h2>
+                {selectedFlight.aircraft_type && (
+                  <div className="text-sm opacity-60">{selectedFlight.aircraft_type}</div>
+                )}
+              </div>
               <button
                 onClick={() => setSelectedFlight(null)}
                 className="opacity-60 hover:opacity-100 text-2xl"
@@ -523,52 +540,63 @@ export default function Home() {
               </button>
             </div>
 
-            <div className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-3">
+              {/* Aircraft info */}
+              {(selectedFlight.registration || selectedFlight.operator) && (
+                <div className="bg-sky-500/20 border border-sky-500/30 rounded-lg p-3">
+                  {selectedFlight.operator && (
+                    <div className="font-medium">{selectedFlight.operator}</div>
+                  )}
+                  {selectedFlight.registration && (
+                    <div className="text-sm opacity-70">Registration: {selectedFlight.registration}</div>
+                  )}
+                </div>
+              )}
+
+              {/* Flight stats */}
+              <div className="grid grid-cols-2 gap-3">
                 <div className="bg-white/5 rounded-lg p-3">
-                  <div className="text-sm opacity-60">Altitude</div>
-                  <div className="text-xl font-bold">{formatAltitude(selectedFlight.altitude)}</div>
+                  <div className="text-xs opacity-60">Altitude</div>
+                  <div className="text-lg font-bold">{formatAltitude(selectedFlight.altitude)}</div>
                 </div>
                 <div className="bg-white/5 rounded-lg p-3">
-                  <div className="text-sm opacity-60">Speed</div>
-                  <div className="text-xl font-bold">{formatSpeed(selectedFlight.velocity)}</div>
+                  <div className="text-xs opacity-60">Speed</div>
+                  <div className="text-lg font-bold">{formatSpeed(selectedFlight.velocity)}</div>
                 </div>
                 <div className="bg-white/5 rounded-lg p-3">
-                  <div className="text-sm opacity-60">Distance</div>
-                  <div className="text-xl font-bold">{formatDistance(selectedFlight.distance)}</div>
+                  <div className="text-xs opacity-60">Distance</div>
+                  <div className="text-lg font-bold">{formatDistance(selectedFlight.distance)}</div>
                 </div>
                 <div className="bg-white/5 rounded-lg p-3">
-                  <div className="text-sm opacity-60">Direction</div>
-                  <div className="text-xl font-bold">
-                    {bearingToDirection(selectedFlight.bearing)} ({Math.round(selectedFlight.bearing)}°)
-                  </div>
+                  <div className="text-xs opacity-60">Elevation</div>
+                  <div className="text-lg font-bold">{Math.round(selectedFlight.elevation)}° up</div>
                 </div>
               </div>
 
-              <div className="bg-white/5 rounded-lg p-3">
-                <div className="text-sm opacity-60">Country of Origin</div>
-                <div className="text-lg font-medium">{selectedFlight.origin_country}</div>
-              </div>
-
+              {/* Heading info */}
               {selectedFlight.heading !== null && (
                 <div className="bg-white/5 rounded-lg p-3">
-                  <div className="text-sm opacity-60">Heading</div>
+                  <div className="text-xs opacity-60">Heading</div>
                   <div className="text-lg font-medium">
                     {bearingToDirection(selectedFlight.heading)} ({Math.round(selectedFlight.heading)}°)
+                    {selectedFlight.vertical_rate !== null && selectedFlight.vertical_rate !== 0 && (
+                      <span className="ml-2 text-sm">
+                        {selectedFlight.vertical_rate > 0 ? "↑ Climbing" : "↓ Descending"}
+                      </span>
+                    )}
                   </div>
                 </div>
               )}
 
-              {selectedFlight.vertical_rate !== null && selectedFlight.vertical_rate !== 0 && (
+              {/* Squawk */}
+              {selectedFlight.squawk && (
                 <div className="bg-white/5 rounded-lg p-3">
-                  <div className="text-sm opacity-60">Vertical Rate</div>
-                  <div className="text-lg font-medium">
-                    {selectedFlight.vertical_rate > 0 ? "↑" : "↓"} {Math.abs(Math.round(selectedFlight.vertical_rate * 196.85))} ft/min
-                  </div>
+                  <div className="text-xs opacity-60">Squawk</div>
+                  <div className="text-lg font-medium font-mono">{selectedFlight.squawk}</div>
                 </div>
               )}
 
-              <div className="text-xs opacity-50 text-center">
+              <div className="text-xs opacity-50 text-center pt-2">
                 ICAO: {selectedFlight.icao24.toUpperCase()}
               </div>
             </div>

@@ -62,13 +62,17 @@ export interface FlightInfo {
   registration?: string;
   aircraft_type?: string;
   operator?: string;
+  // Route info (if available)
+  origin?: string;
+  destination?: string;
+  squawk?: string;
 }
 
 export async function GET(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams;
   const lat = parseFloat(searchParams.get("lat") || "");
   const lon = parseFloat(searchParams.get("lon") || "");
-  const radiusKm = parseFloat(searchParams.get("radius") || "200");
+  const radiusKm = parseFloat(searchParams.get("radius") || "50"); // 50km default - what you can realistically see
 
   if (isNaN(lat) || isNaN(lon)) {
     return NextResponse.json({ error: "Invalid coordinates" }, { status: 400 });
@@ -141,6 +145,7 @@ export async function GET(request: NextRequest) {
           registration: ac.r as string | undefined,
           aircraft_type: ac.t as string | undefined,
           operator: ac.ownOp as string | undefined,
+          squawk: ac.squawk as string | undefined,
         };
       })
       .filter((f: FlightInfo | null): f is FlightInfo => f !== null)
