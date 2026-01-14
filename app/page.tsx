@@ -144,13 +144,44 @@ export default function Home() {
     }
   }, [location]);
 
-  // Fetch on app open, then every 60s to conserve API quota
+  // Fetch on app open, then every 60s - but only when tab is visible
   useEffect(() => {
-    if (location) {
+    if (!location) return;
+
+    let interval: NodeJS.Timeout | null = null;
+
+    const startPolling = () => {
+      if (interval) return;
       fetchFlights();
-      const interval = setInterval(fetchFlights, 60000); // Refresh every 60s
-      return () => clearInterval(interval);
+      interval = setInterval(fetchFlights, 60000);
+    };
+
+    const stopPolling = () => {
+      if (interval) {
+        clearInterval(interval);
+        interval = null;
+      }
+    };
+
+    const handleVisibility = () => {
+      if (document.hidden) {
+        stopPolling();
+      } else {
+        startPolling();
+      }
+    };
+
+    // Start if visible
+    if (!document.hidden) {
+      startPolling();
     }
+
+    document.addEventListener("visibilitychange", handleVisibility);
+
+    return () => {
+      stopPolling();
+      document.removeEventListener("visibilitychange", handleVisibility);
+    };
   }, [location, fetchFlights]);
 
   // Request device orientation permission
