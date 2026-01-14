@@ -476,7 +476,18 @@ export default function Home() {
                       const y = 100 - r * Math.cos((flight.bearing * Math.PI) / 180);
 
                       return (
-                        <g key={flight.icao24}>
+                        <g
+                          key={flight.icao24}
+                          onClick={() => setSelectedFlight(flight)}
+                          style={{ cursor: "pointer" }}
+                        >
+                          {/* Larger invisible hit area for easier clicking */}
+                          <circle
+                            cx={x}
+                            cy={y}
+                            r={12}
+                            fill="transparent"
+                          />
                           <circle
                             cx={x}
                             cy={y}
