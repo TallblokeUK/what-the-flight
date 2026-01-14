@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 export const runtime = "edge";
 
 // Simple in-memory cache (will reset on cold starts, but helps during session)
-const routeCache = new Map<string, { origin: string; destination: string; airline: string; timestamp: number }>();
+const routeCache = new Map<string, { origin: string; destination: string; airline: string; originName?: string; destinationName?: string; timestamp: number }>();
 const CACHE_TTL = 1000 * 60 * 60; // 1 hour
 
 export interface RouteInfo {
@@ -28,7 +28,9 @@ export async function GET(request: NextRequest) {
   if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
     return NextResponse.json({
       origin: cached.origin,
+      originName: cached.originName,
       destination: cached.destination,
+      destinationName: cached.destinationName,
       airline: cached.airline,
       cached: true,
     });
@@ -38,79 +40,127 @@ export async function GET(request: NextRequest) {
   const airlineIcao = callsign.slice(0, 3);
   const flightNumber = callsign.slice(3);
 
-  // Use AeroDataBox via RapidAPI to look up the flight
-  const rapidApiKey = process.env.RAPIDAPI_KEY;
-
-  if (!rapidApiKey) {
-    return NextResponse.json({
-      error: "Route lookup not configured",
-      airline: getAirlineName(airlineIcao),
-      flightNumber,
-    });
-  }
-
-  try {
-    // Try to find the flight using AeroDataBox
-    const response = await fetch(
-      `https://aerodatabox.p.rapidapi.com/flights/callsign/${callsign}`,
-      {
-        headers: {
-          "X-RapidAPI-Key": rapidApiKey,
-          "X-RapidAPI-Host": "aerodatabox.p.rapidapi.com",
-        },
-      }
-    );
-
-    if (!response.ok) {
-      // Fallback to just airline name
-      return NextResponse.json({
-        airline: getAirlineName(airlineIcao),
-        flightNumber,
-        error: `Lookup failed: ${response.status}`,
-      });
-    }
-
-    const data = await response.json();
-
-    // AeroDataBox returns an array of matching flights
-    if (data && Array.isArray(data) && data.length > 0) {
-      const flight = data[0];
-      const result = {
-        origin: flight.departure?.airport?.iata || flight.departure?.airport?.icao,
-        originName: flight.departure?.airport?.name,
-        destination: flight.arrival?.airport?.iata || flight.arrival?.airport?.icao,
-        destinationName: flight.arrival?.airport?.name,
-        airline: flight.airline?.name || getAirlineName(airlineIcao),
-        flightNumber: flight.number || flightNumber,
-      };
-
-      // Cache the result
-      if (result.origin && result.destination) {
+  // Try AirLabs first (1000 requests/month free)
+  const airLabsKey = process.env.AIRLABS_KEY;
+  if (airLabsKey) {
+    try {
+      const result = await fetchFromAirLabs(callsign, airLabsKey, airlineIcao, flightNumber);
+      if (result.origin || result.destination) {
+        // Cache successful result
         routeCache.set(callsign, {
-          origin: result.origin,
-          destination: result.destination,
+          origin: result.origin || "",
+          destination: result.destination || "",
+          originName: result.originName,
+          destinationName: result.destinationName,
           airline: result.airline || "",
           timestamp: Date.now(),
         });
+        return NextResponse.json(result);
       }
-
-      return NextResponse.json(result);
+    } catch (error) {
+      console.error("AirLabs error:", error);
     }
-
-    // No results found
-    return NextResponse.json({
-      airline: getAirlineName(airlineIcao),
-      flightNumber,
-      notFound: true,
-    });
-  } catch (error) {
-    console.error("Route lookup error:", error);
-    return NextResponse.json({
-      airline: getAirlineName(airlineIcao),
-      flightNumber,
-      error: error instanceof Error ? error.message : "Unknown error",
-    });
   }
+
+  // Try AviationStack as backup (100 requests/month free)
+  const aviationStackKey = process.env.AVIATIONSTACK_KEY;
+  if (aviationStackKey) {
+    try {
+      const result = await fetchFromAviationStack(callsign, aviationStackKey, airlineIcao, flightNumber);
+      if (result.origin || result.destination) {
+        // Cache successful result
+        routeCache.set(callsign, {
+          origin: result.origin || "",
+          destination: result.destination || "",
+          originName: result.originName,
+          destinationName: result.destinationName,
+          airline: result.airline || "",
+          timestamp: Date.now(),
+        });
+        return NextResponse.json(result);
+      }
+    } catch (error) {
+      console.error("AviationStack error:", error);
+    }
+  }
+
+  // Fallback to just airline name from ICAO code
+  return NextResponse.json({
+    airline: getAirlineName(airlineIcao),
+    flightNumber,
+  });
+}
+
+async function fetchFromAirLabs(
+  callsign: string,
+  apiKey: string,
+  airlineIcao: string,
+  flightNumber: string
+): Promise<RouteInfo> {
+  // AirLabs uses flight_icao parameter
+  const response = await fetch(
+    `https://airlabs.co/api/v9/flights?api_key=${apiKey}&flight_icao=${callsign}`,
+    { cache: "no-store" }
+  );
+
+  if (!response.ok) {
+    throw new Error(`AirLabs error: ${response.status}`);
+  }
+
+  const data = await response.json();
+
+  if (data.response && data.response.length > 0) {
+    const flight = data.response[0];
+    return {
+      origin: flight.dep_iata || flight.dep_icao,
+      originName: flight.dep_city,
+      destination: flight.arr_iata || flight.arr_icao,
+      destinationName: flight.arr_city,
+      airline: flight.airline_name || getAirlineName(airlineIcao),
+      flightNumber: flight.flight_number || flightNumber,
+    };
+  }
+
+  return {
+    airline: getAirlineName(airlineIcao),
+    flightNumber,
+  };
+}
+
+async function fetchFromAviationStack(
+  callsign: string,
+  apiKey: string,
+  airlineIcao: string,
+  flightNumber: string
+): Promise<RouteInfo> {
+  // AviationStack uses flight_icao parameter
+  const response = await fetch(
+    `http://api.aviationstack.com/v1/flights?access_key=${apiKey}&flight_icao=${callsign}`,
+    { cache: "no-store" }
+  );
+
+  if (!response.ok) {
+    throw new Error(`AviationStack error: ${response.status}`);
+  }
+
+  const data = await response.json();
+
+  if (data.data && data.data.length > 0) {
+    const flight = data.data[0];
+    return {
+      origin: flight.departure?.iata || flight.departure?.icao,
+      originName: flight.departure?.airport,
+      destination: flight.arrival?.iata || flight.arrival?.icao,
+      destinationName: flight.arrival?.airport,
+      airline: flight.airline?.name || getAirlineName(airlineIcao),
+      flightNumber: flight.flight?.number || flightNumber,
+    };
+  }
+
+  return {
+    airline: getAirlineName(airlineIcao),
+    flightNumber,
+  };
 }
 
 // Common airline ICAO codes to names
