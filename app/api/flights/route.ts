@@ -58,13 +58,13 @@ export interface FlightInfo {
   bearing: number;
   distance: number;
   elevation: number;
-  // Extra fields from ADSB Exchange
   registration?: string;
   aircraft_type?: string;
   operator?: string;
-  // Route info (if available)
   origin?: string;
+  originName?: string;
   destination?: string;
+  destinationName?: string;
   squawk?: string;
 }
 
@@ -78,95 +78,102 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "Invalid coordinates" }, { status: 400 });
   }
 
-  // Convert km to nautical miles (1 nm = 1.852 km)
-  // Max 250 nm for ADSB Exchange API
-  const radiusNm = Math.min(Math.round(radiusKm / 1.852), 250);
-
-  const apiKey = process.env.RAPIDAPI_KEY;
-
-  if (!apiKey) {
-    // Fallback: Try OpenSky as backup
-    return fetchFromOpenSky(lat, lon, radiusKm);
+  // Try AirLabs first (has origin/destination built in!)
+  const airLabsKey = process.env.AIRLABS_KEY;
+  if (airLabsKey) {
+    try {
+      const result = await fetchFromAirLabs(lat, lon, radiusKm, airLabsKey);
+      if (result) return result;
+    } catch (error) {
+      console.error("AirLabs error:", error);
+    }
   }
 
-  try {
-    const apiUrl = `https://adsbexchange-com1.p.rapidapi.com/v2/lat/${lat}/lon/${lon}/dist/${radiusNm}/`;
+  // Fallback to OpenSky
+  return fetchFromOpenSky(lat, lon, radiusKm);
+}
 
-    const response = await fetch(apiUrl, {
-      headers: {
-        "X-RapidAPI-Key": apiKey,
-        "X-RapidAPI-Host": "adsbexchange-com1.p.rapidapi.com",
-      },
-    });
+// Primary source: AirLabs - includes origin/destination!
+async function fetchFromAirLabs(lat: number, lon: number, radiusKm: number, apiKey: string) {
+  // Calculate bounding box
+  const latDelta = radiusKm / 111;
+  const lonDelta = radiusKm / (111 * Math.cos((lat * Math.PI) / 180));
 
-    if (!response.ok) {
-      console.error("ADSB Exchange error:", response.status);
-      // Fallback to OpenSky
-      return fetchFromOpenSky(lat, lon, radiusKm);
-    }
+  const bbox = `${lat - latDelta},${lon - lonDelta},${lat + latDelta},${lon + lonDelta}`;
 
-    const data = await response.json();
+  const response = await fetch(
+    `https://airlabs.co/api/v9/flights?api_key=${apiKey}&bbox=${bbox}`,
+    { cache: "no-store" }
+  );
 
-    if (!data.ac || data.ac.length === 0) {
-      return NextResponse.json({
-        flights: [],
-        timestamp: Date.now(),
-        source: "adsbexchange",
-      });
-    }
+  if (!response.ok) {
+    throw new Error(`AirLabs error: ${response.status}`);
+  }
 
-    const flights: FlightInfo[] = data.ac
-      .map((ac: Record<string, unknown>): FlightInfo | null => {
-        const acLat = ac.lat as number | undefined;
-        const acLon = ac.lon as number | undefined;
-        const altitude = (ac.alt_geom as number) ?? (ac.alt_baro as number) ?? 0;
+  const data = await response.json();
 
-        if (!acLat || !acLon) return null;
-        if (ac.on_ground || altitude < 100) return null;
-
-        const bearing = calculateBearing(lat, lon, acLat, acLon);
-        const distance = calculateDistance(lat, lon, acLat, acLon);
-        const elevation = calculateElevation(distance, altitude * 0.3048); // Convert feet to meters
-
-        return {
-          icao24: (ac.hex as string) || "unknown",
-          callsign: ((ac.flight as string) || "").trim() || (ac.r as string) || "Unknown",
-          origin_country: (ac.dbFlags as number) === 1 ? "Military" : "",
-          latitude: acLat,
-          longitude: acLon,
-          altitude: altitude * 0.3048, // Convert to meters
-          velocity: ac.gs ? (ac.gs as number) * 0.514444 : null, // knots to m/s
-          heading: (ac.track as number) ?? null,
-          vertical_rate: ac.baro_rate ? (ac.baro_rate as number) * 0.00508 : null, // ft/min to m/s
-          on_ground: !!ac.on_ground,
-          bearing,
-          distance,
-          elevation,
-          registration: ac.r as string | undefined,
-          aircraft_type: ac.t as string | undefined,
-          operator: ac.ownOp as string | undefined,
-          squawk: ac.squawk as string | undefined,
-        };
-      })
-      .filter((f: FlightInfo | null): f is FlightInfo => f !== null)
-      .sort((a: FlightInfo, b: FlightInfo) => a.distance - b.distance);
-
+  if (!data.response || data.response.length === 0) {
     return NextResponse.json({
-      flights,
+      flights: [],
       timestamp: Date.now(),
-      userLocation: { lat, lon },
-      source: "adsbexchange",
-      debug: {
-        rawCount: data.ac?.length || 0,
-        filteredCount: flights.length,
-        radiusNm,
-      },
+      source: "airlabs",
     });
-  } catch (error) {
-    console.error("ADSB Exchange error:", error);
-    // Fallback to OpenSky
-    return fetchFromOpenSky(lat, lon, radiusKm);
   }
+
+  const flights: FlightInfo[] = data.response
+    .map((flight: Record<string, unknown>): FlightInfo | null => {
+      const acLat = flight.lat as number | undefined;
+      const acLon = flight.lng as number | undefined;
+      const altitude = ((flight.alt as number) || 0) * 0.3048; // AirLabs returns feet, convert to meters
+
+      if (!acLat || !acLon) return null;
+      if (altitude < 100) return null; // Filter ground/very low aircraft
+
+      const bearing = calculateBearing(lat, lon, acLat, acLon);
+      const distance = calculateDistance(lat, lon, acLat, acLon);
+      const elevation = calculateElevation(distance, altitude);
+
+      // Skip if outside our radius (bbox is a square, we want a circle)
+      if (distance > radiusKm) return null;
+
+      return {
+        icao24: (flight.hex as string) || (flight.icao_24 as string) || "unknown",
+        callsign: ((flight.flight_icao as string) || (flight.flight_iata as string) || "").trim() || "Unknown",
+        origin_country: (flight.flag as string) || "",
+        latitude: acLat,
+        longitude: acLon,
+        altitude,
+        velocity: flight.speed ? (flight.speed as number) * 0.514444 : null, // knots to m/s
+        heading: (flight.dir as number) ?? null,
+        vertical_rate: flight.v_speed ? (flight.v_speed as number) * 0.00508 : null, // ft/min to m/s
+        on_ground: false,
+        bearing,
+        distance,
+        elevation,
+        registration: flight.reg_number as string | undefined,
+        aircraft_type: flight.aircraft_icao as string | undefined,
+        operator: flight.airline_name as string | undefined,
+        origin: (flight.dep_iata as string) || (flight.dep_icao as string),
+        originName: flight.dep_city as string | undefined,
+        destination: (flight.arr_iata as string) || (flight.arr_icao as string),
+        destinationName: flight.arr_city as string | undefined,
+        squawk: flight.squawk as string | undefined,
+      };
+    })
+    .filter((f: FlightInfo | null): f is FlightInfo => f !== null)
+    .sort((a: FlightInfo, b: FlightInfo) => a.distance - b.distance);
+
+  return NextResponse.json({
+    flights,
+    timestamp: Date.now(),
+    userLocation: { lat, lon },
+    source: "airlabs",
+    debug: {
+      rawCount: data.response?.length || 0,
+      filteredCount: flights.length,
+      radiusKm,
+    },
+  });
 }
 
 // Fallback to OpenSky Network

@@ -21,6 +21,11 @@ interface FlightInfo {
   aircraft_type?: string;
   operator?: string;
   squawk?: string;
+  // Route info (from AirLabs)
+  origin?: string;
+  originName?: string;
+  destination?: string;
+  destinationName?: string;
 }
 
 // Normalize angle to 0-360
@@ -90,15 +95,6 @@ export default function Home() {
 
   const [matchedFlight, setMatchedFlight] = useState<FlightInfo | null>(null);
   const [selectedFlight, setSelectedFlight] = useState<FlightInfo | null>(null);
-  const [routeInfo, setRouteInfo] = useState<{
-    origin?: string;
-    originName?: string;
-    destination?: string;
-    destinationName?: string;
-    airline?: string;
-    flightNumber?: string;
-  } | null>(null);
-  const [loadingRoute, setLoadingRoute] = useState(false);
 
   const lastHeadingRef = useRef<number | null>(null);
   const lastTiltRef = useRef<number | null>(null);
@@ -274,33 +270,6 @@ export default function Home() {
     setMatchedFlight(bestMatch);
   }, [compassHeading, deviceTilt, flights, isTracking]);
 
-  // Fetch route info when a flight is selected
-  useEffect(() => {
-    if (!selectedFlight) {
-      setRouteInfo(null);
-      return;
-    }
-
-    const callsign = selectedFlight.callsign;
-    if (!callsign || callsign === "Unknown") {
-      setRouteInfo(null);
-      return;
-    }
-
-    setLoadingRoute(true);
-    fetch(`/api/route?callsign=${encodeURIComponent(callsign)}`)
-      .then((res) => res.json())
-      .then((data) => {
-        setRouteInfo(data);
-      })
-      .catch((err) => {
-        console.error("Failed to fetch route:", err);
-        setRouteInfo(null);
-      })
-      .finally(() => {
-        setLoadingRoute(false);
-      });
-  }, [selectedFlight]);
 
   // Show loading state
   if (!location && !locationError) {
@@ -579,33 +548,22 @@ export default function Home() {
 
             <div className="space-y-3">
               {/* Route info - the main thing people want! */}
-              {loadingRoute ? (
-                <div className="bg-amber-500/20 border border-amber-500/30 rounded-lg p-4 text-center">
-                  <div className="animate-pulse">Looking up route...</div>
-                </div>
-              ) : (routeInfo?.origin || routeInfo?.destination) ? (
+              {(selectedFlight.origin || selectedFlight.destination) ? (
                 <div className="bg-green-500/20 border border-green-500/30 rounded-lg p-4">
                   <div className="text-center">
                     <div className="flex items-center justify-center gap-3 text-xl font-bold">
-                      <span>{routeInfo.origin || "?"}</span>
+                      <span>{selectedFlight.origin || "?"}</span>
                       <span className="text-green-400">→</span>
-                      <span>{routeInfo.destination || "?"}</span>
+                      <span>{selectedFlight.destination || "?"}</span>
                     </div>
-                    {(routeInfo.originName || routeInfo.destinationName) && (
+                    {(selectedFlight.originName || selectedFlight.destinationName) && (
                       <div className="text-sm opacity-70 mt-1">
-                        {routeInfo.originName && <span>{routeInfo.originName}</span>}
-                        {routeInfo.originName && routeInfo.destinationName && <span> to </span>}
-                        {routeInfo.destinationName && <span>{routeInfo.destinationName}</span>}
+                        {selectedFlight.originName && <span>{selectedFlight.originName}</span>}
+                        {selectedFlight.originName && selectedFlight.destinationName && <span> to </span>}
+                        {selectedFlight.destinationName && <span>{selectedFlight.destinationName}</span>}
                       </div>
                     )}
                   </div>
-                </div>
-              ) : routeInfo?.airline ? (
-                <div className="bg-sky-500/20 border border-sky-500/30 rounded-lg p-3 text-center">
-                  <div className="font-medium">{routeInfo.airline}</div>
-                  {routeInfo.flightNumber && (
-                    <div className="text-sm opacity-70">Flight {routeInfo.flightNumber}</div>
-                  )}
                 </div>
               ) : null}
 
