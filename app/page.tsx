@@ -183,7 +183,34 @@ export default function Home() {
       }
 
       if (event.beta !== null) {
-        const rawTilt = Math.max(0, Math.min(90, 90 - event.beta));
+        // Device orientation beta values:
+        // - Phone flat, screen up: beta = 0
+        // - Phone vertical, screen facing you: beta = 90
+        // - Phone tilted back (pointing at sky): beta > 90 (up to 180) OR beta < 0 (down to -90)
+        //
+        // We want elevation angle: 0° = horizontal, 90° = straight up
+        // When holding phone in portrait and tilting back to point at sky:
+        // beta goes from 90 (vertical) toward 0 (flat) then negative (past flat, pointing up)
+
+        let rawTilt: number;
+        const beta = event.beta;
+
+        if (beta >= 0 && beta <= 90) {
+          // Phone from flat (0) to vertical (90) - pointing horizontal to slightly down
+          // Map: beta 90 -> tilt 0, beta 0 -> tilt 90
+          rawTilt = 90 - beta;
+        } else if (beta < 0) {
+          // Phone tilted past vertical, pointing up at sky
+          // beta -90 = pointing straight up (zenith)
+          // Map: beta 0 -> tilt 90, beta -90 -> tilt 180 (but cap at 90)
+          rawTilt = 90 - beta; // This gives 90 to 180
+        } else {
+          // beta > 90: phone tilted forward (screen facing down)
+          rawTilt = 90 - beta; // Negative values = pointing below horizon
+        }
+
+        rawTilt = Math.max(0, Math.min(90, rawTilt));
+
         const smoothed = lastTiltRef.current === null
           ? rawTilt
           : lastTiltRef.current + (rawTilt - lastTiltRef.current) * SMOOTHING_FACTOR;
